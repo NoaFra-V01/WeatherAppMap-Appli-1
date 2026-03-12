@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node test_step2.js)",
+      "Bash(node --check src/weather.js)",
+      "Bash(node test_step3.js)"
+    ]
+  }
+}
