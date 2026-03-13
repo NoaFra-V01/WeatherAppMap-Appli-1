@@ -102,6 +102,29 @@ const CSS = `
   .theme-toggle:hover { border-color: var(--border-focus); transform: scale(1.05); }
   .theme-toggle .icon { font-size: 1.1rem; }
 
+  /* ── Header actions group ── */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* ── Unit toggle ── */
+  .unit-toggle {
+    background: var(--toggle-bg);
+    border: 1px solid var(--toggle-border);
+    border-radius: 2rem;
+    padding: 0.35rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    color: var(--text-sub);
+    letter-spacing: 0.03em;
+  }
+  .unit-toggle:hover { border-color: var(--border-focus); transform: scale(1.05); }
+
   /* ── Card ── */
   .card {
     background: var(--surface);
@@ -332,12 +355,55 @@ const TOGGLE_SCRIPT = `
   });
 `;
 
+const UNIT_SCRIPT = `
+  document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('unit-toggle');
+
+    function toF(celsius) {
+      return Math.round(celsius * 9 / 5 + 32);
+    }
+
+    function applyUnit(unit) {
+      localStorage.setItem('wd-unit', unit);
+      if (btn) {
+        btn.textContent = unit === 'C' ? '\\u00b0F' : '\\u00b0C';
+      }
+      var mainTemp = document.getElementById('main-temp');
+      var feelsTemp = document.getElementById('feels-temp');
+      if (mainTemp) {
+        var c = parseInt(mainTemp.getAttribute('data-celsius'), 10);
+        mainTemp.textContent = unit === 'C' ? c + '\\u00b0C' : toF(c) + '\\u00b0F';
+      }
+      if (feelsTemp) {
+        var cf = parseInt(feelsTemp.getAttribute('data-celsius'), 10);
+        feelsTemp.textContent = unit === 'C' ? 'Ressenti ' + cf + '\\u00b0C' : 'Ressenti ' + toF(cf) + '\\u00b0F';
+      }
+    }
+
+    var savedUnit = localStorage.getItem('wd-unit') || 'C';
+    applyUnit(savedUnit);
+
+    if (btn) {
+      btn.addEventListener('click', function () {
+        var currentUnit = localStorage.getItem('wd-unit') || 'C';
+        applyUnit(currentUnit === 'C' ? 'F' : 'C');
+      });
+    }
+  });
+`;
+
 function buildMapScript(lat, lon, cityName, countryCode) {
   const safeCityName = String(cityName).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const safeCountry  = String(countryCode).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   return `
 (function () {
   var map = L.map('weather-map', { zoomControl: true }).setView([${lat}, ${lon}], 11);
+
+  function toF(c) { return Math.round(c * 9 / 5 + 32); }
+  function fmtTemp(c) {
+    var unit = localStorage.getItem('wd-unit') || 'C';
+    return unit === 'C' ? c + '°C' : toF(c) + '°F';
+  }
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -377,7 +443,7 @@ function buildMapScript(lat, lon, cityName, countryCode) {
               '<div class="popup-forecast-slot">' +
                 '<span>' + slot.time + '</span>' +
                 '<img src="' + slotIcon + '" alt="">' +
-                '<span class="fc-temp">' + slot.temp + '\\u00b0C</span>' +
+                '<span class="fc-temp">' + fmtTemp(slot.temp) + '</span>' +
               '</div>';
           }
           forecastHtml += '</div>';
@@ -387,7 +453,7 @@ function buildMapScript(lat, lon, cityName, countryCode) {
           '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">' +
           '<img src="' + iconUrl + '" alt="' + desc + '" style="width:32px;height:32px;">' +
           '<strong>' + desc + '</strong></div>' +
-          '\\uD83C\\uDF21 Temp : <strong>' + data.temp + '\\u00b0C</strong> (ressenti ' + data.feelsLike + '\\u00b0C)<br>' +
+          '\\uD83C\\uDF21 Temp : <strong>' + fmtTemp(data.temp) + '</strong> (ressenti ' + fmtTemp(data.feelsLike) + ')<br>' +
           '\\uD83D\\uDCA7 Humidit\\u00e9 : <strong>' + data.humidity + '%</strong><br>' +
           '\\uD83D\\uDCA8 Vent : <strong>' + data.wind + ' km/h</strong>' +
           forecastHtml
@@ -438,13 +504,17 @@ function shell(bodyContent, includeLeaflet = false) {
 <body>
   <div class="header">
     <div class="app-title">⛅ Weather Dash</div>
-    <button class="theme-toggle" id="theme-toggle" aria-label="Changer de thème">
-      <span class="icon">☀️</span>
-      <span class="label">Clair</span>
-    </button>
+    <div class="header-actions">
+      <button class="unit-toggle" id="unit-toggle" aria-label="Changer d'unité de température">°F</button>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Changer de thème">
+        <span class="icon">☀️</span>
+        <span class="label">Clair</span>
+      </button>
+    </div>
   </div>
   ${bodyContent}
   <script>${TOGGLE_SCRIPT}<\/script>
+  <script>${UNIT_SCRIPT}<\/script>
 </body>
 </html>`;
 }
@@ -493,8 +563,8 @@ function renderResult(weather, comment) {
     <div class="weather-grid">
       <div class="stat">
         <div class="stat-label">Température</div>
-        <div class="stat-value ${tc}">${weather.temp}°C</div>
-        <div class="stat-sub">Ressenti ${weather.feelsLike}°C</div>
+        <div class="stat-value ${tc}" id="main-temp" data-celsius="${weather.temp}">${weather.temp}°C</div>
+        <div class="stat-sub" id="feels-temp" data-celsius="${weather.feelsLike}">Ressenti ${weather.feelsLike}°C</div>
       </div>
       <div class="stat">
         <div class="stat-label">Conditions</div>
