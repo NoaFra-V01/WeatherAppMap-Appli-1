@@ -224,6 +224,82 @@ const CSS = `
     .weather-grid { grid-template-columns: 1fr; }
     .app-title { font-size: 1.1rem; }
   }
+
+/* ── Map card ── */
+.map-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+#weather-map {
+  width: 100%;
+  height: 320px;
+  border-radius: 1.1rem;
+  display: block;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow) !important;
+  border-radius: 0.75rem !important;
+}
+.leaflet-popup-tip {
+  background: var(--surface) !important;
+}
+.leaflet-popup-content {
+  margin: 0.75rem 1rem !important;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+.map-popup-city {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+  color: var(--title);
+}
+.map-popup-loading {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.map-popup-error {
+  color: var(--error-title);
+  font-style: italic;
+}
+
+/* ── Forecast strip in popup ── */
+.popup-forecast {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+.popup-forecast-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 44px;
+  font-size: 0.72rem;
+  color: var(--text-sub);
+}
+.popup-forecast-slot img {
+  width: 28px;
+  height: 28px;
+}
+.popup-forecast-slot .fc-temp {
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 420px) {
+  #weather-map { height: 220px; }
+}
 `;
 
 const THEME_SCRIPT = `
@@ -256,6 +332,75 @@ const TOGGLE_SCRIPT = `
   });
 `;
 
+function buildMapScript(lat, lon, cityName, countryCode) {
+  const safeCityName = String(cityName).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const safeCountry  = String(countryCode).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return `
+(function () {
+  var map = L.map('weather-map', { zoomControl: true }).setView([${lat}, ${lon}], 11);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '\\u00a9 <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  var initialMarker = L.marker([${lat}, ${lon}]).addTo(map);
+  initialMarker.bindPopup(
+    '<div class="map-popup-city">${safeCityName}, ${safeCountry}</div>' +
+    '<div style="color:var(--text-muted);font-size:0.8rem;">${lat.toFixed(4)}, ${lon.toFixed(4)}</div>'
+  ).openPopup();
+
+  map.on('click', function (e) {
+    var clickLat = e.latlng.lat.toFixed(6);
+    var clickLon = e.latlng.lng.toFixed(6);
+
+    var popup = L.popup()
+      .setLatLng(e.latlng)
+      .setContent('<div class="map-popup-loading">Chargement...</div>')
+      .openOn(map);
+
+    fetch('/api/weather-at?lat=' + clickLat + '&lon=' + clickLon + '&forecast=1')
+      .then(function (res) {
+        if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || 'Erreur ' + res.status); });
+        return res.json();
+      })
+      .then(function (data) {
+        var iconUrl = 'https://openweathermap.org/img/wn/' + data.icon + '.png';
+        var desc = data.description.charAt(0).toUpperCase() + data.description.slice(1);
+        var forecastHtml = '';
+        if (data.forecast && data.forecast.length > 0) {
+          forecastHtml = '<div class="popup-forecast">';
+          for (var i = 0; i < data.forecast.length; i++) {
+            var slot = data.forecast[i];
+            var slotIcon = 'https://openweathermap.org/img/wn/' + slot.icon + '.png';
+            forecastHtml +=
+              '<div class="popup-forecast-slot">' +
+                '<span>' + slot.time + '</span>' +
+                '<img src="' + slotIcon + '" alt="">' +
+                '<span class="fc-temp">' + slot.temp + '\\u00b0C</span>' +
+              '</div>';
+          }
+          forecastHtml += '</div>';
+        }
+        popup.setContent(
+          '<div class="map-popup-city">' + data.city + ', ' + data.country + '</div>' +
+          '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">' +
+          '<img src="' + iconUrl + '" alt="' + desc + '" style="width:32px;height:32px;">' +
+          '<strong>' + desc + '</strong></div>' +
+          '\\uD83C\\uDF21 Temp : <strong>' + data.temp + '\\u00b0C</strong> (ressenti ' + data.feelsLike + '\\u00b0C)<br>' +
+          '\\uD83D\\uDCA7 Humidit\\u00e9 : <strong>' + data.humidity + '%</strong><br>' +
+          '\\uD83D\\uDCA8 Vent : <strong>' + data.wind + ' km/h</strong>' +
+          forecastHtml
+        );
+      })
+      .catch(function (err) {
+        popup.setContent('<div class="map-popup-error">Erreur : ' + err.message + '</div>');
+      });
+  });
+})();
+`;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function tempClass(temp) {
@@ -277,14 +422,17 @@ function escapeHtml(str) {
 
 // ─── Shell ───────────────────────────────────────────────────────────────────
 
-function shell(bodyContent) {
+function shell(bodyContent, includeLeaflet = false) {
+  const leafletTags = includeLeaflet ? `  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""><\/script>
+  ` : '';
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Weather Dash</title>
-  <script>${THEME_SCRIPT}<\/script>
+  ${leafletTags}<script>${THEME_SCRIPT}<\/script>
   <style>${CSS}</style>
 </head>
 <body>
@@ -321,6 +469,7 @@ function renderHome() {
 }
 
 function renderResult(weather, comment) {
+  const mapScript = buildMapScript(weather.lat, weather.lon, weather.city, weather.country);
   const iconUrl = `https://openweathermap.org/img/wn/${weather.icon}@2x.png`;
   const tc  = tempClass(weather.temp);
   const desc = weather.description.charAt(0).toUpperCase() + weather.description.slice(1);
@@ -366,7 +515,12 @@ function renderResult(weather, comment) {
     <div class="comment-label">🎭 Le styliste dit</div>
     <div class="comment-text">${escapeHtml(comment)}</div>
   </div>
-  `);
+
+  <div class="card map-card">
+    <div id="weather-map"></div>
+  </div>
+  <script>${mapScript}<\/script>
+  `, true);
 }
 
 function renderError(title, message) {

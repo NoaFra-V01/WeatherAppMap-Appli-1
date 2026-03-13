@@ -5,6 +5,7 @@ const express = require('express');
 const { getWeather } = require('./src/weather');
 const { getSarcasticComment } = require('./src/llm');
 const { renderHome, renderResult, renderError } = require('./src/template');
+const { getWeatherByCoords, getForecastByCoords } = require('./src/mapWeather');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,6 +92,39 @@ app.get('/', async (req, res) => {
   } catch (err) {
     const { statusCode, title, message } = handleApiError(err, city);
     return res.status(statusCode).send(renderError(title, message));
+  }
+});
+
+// ─── API map endpoint ─────────────────────────────────────────────────────────
+
+app.get('/api/weather-at', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lon = parseFloat(req.query.lon);
+  const withForecast = req.query.forecast === '1';
+
+  if (isNaN(lat) || isNaN(lon)) {
+    return res.status(400).json({ error: 'Paramètres lat et lon requis (nombres valides).' });
+  }
+
+  try {
+    if (withForecast) {
+      const [current, forecast] = await Promise.all([
+        getWeatherByCoords(lat, lon),
+        getForecastByCoords(lat, lon),
+      ]);
+      return res.json({ ...current, forecast });
+    }
+
+    const data = await getWeatherByCoords(lat, lon);
+    return res.json(data);
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: 'Aucune donnée météo disponible pour ces coordonnées.' });
+    }
+    if (err.code === 'ECONNABORTED' || err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
+      return res.status(503).json({ error: "Impossible de joindre l'API météo." });
+    }
+    return res.status(500).json({ error: err.message || 'Erreur inconnue.' });
   }
 });
 

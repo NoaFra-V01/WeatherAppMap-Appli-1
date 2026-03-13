@@ -31,6 +31,8 @@ async function getWeather(city) {
     humidity: data.main.humidity,
     wind: Math.round(data.wind.speed * 3.6), // m/s → km/h
     icon: data.weather[0].icon,
+    lat: data.coord.lat,
+    lon: data.coord.lon,
   };
 }
 
